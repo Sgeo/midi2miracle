@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::io::{Read, Write};
 
 use midly::live::{LiveEvent, self};
 
@@ -37,6 +37,7 @@ fn gmFromMiracleLiveEvent(live_event: &mut midly::live::LiveEvent) {
 fn processStream(miracle_output_connection: &mut midir::MidiOutputConnection, stream: &mut std::net::TcpStream) {
     let mut midi_stream = midly::stream::MidiStream::new();
     let mut out_buffer = Vec::<u8>::new();
+    stream.set_nodelay(true);
     loop {
         let mut buffer: [u8; 1] = [0x00; 1];
         stream.read_exact(&mut buffer);
@@ -53,16 +54,25 @@ fn processStream(miracle_output_connection: &mut midir::MidiOutputConnection, st
 fn main() -> anyhow::Result<()> {
     let miracle_output = midir::MidiOutput::new("Miracle")?;
     let miracle_output_ports = miracle_output.ports();
-    for port in &miracle_output_ports {
-        println!("Detected output port {}", miracle_output.port_name(&port)?);
+    println!("Output ports: ");
+    for (index, port) in miracle_output_ports.iter().enumerate() {
+        println!("{}: {}", index, miracle_output.port_name(&port)?);
     }
 
     if miracle_output_ports.len() < 1 {
-        eprintln!("No ports!");
+        eprintln!("No output ports!");
         return Ok(())
     }
 
-    let mut miracle_output_connection = miracle_output.connect(&miracle_output_ports[0], "Miracle")?;
+    print!("Choose an output port: ");
+    std::io::stdout().flush()?;
+
+    let mut line = String::new();
+    std::io::stdin().read_line(&mut line)?;
+    let output_index: usize = line.trim().parse()?;
+
+
+    let mut miracle_output_connection = miracle_output.connect(&miracle_output_ports[output_index], "Miracle")?;
 
 
     let mut stream_result = std::net::TcpStream::connect("127.0.0.1:5858");
