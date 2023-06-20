@@ -34,7 +34,7 @@ fn gmFromMiracleLiveEvent(live_event: &mut midly::live::LiveEvent) {
     }
 }
 
-fn processStream(miracle_output_connection: &mut midir::MidiOutputConnection, stream: &mut std::net::TcpStream) {
+fn process_output_stream(miracle_output_connection: &mut midir::MidiOutputConnection, stream: &mut std::net::TcpStream) {
     let mut midi_stream = midly::stream::MidiStream::new();
     let mut out_buffer = Vec::<u8>::new();
     stream.set_nodelay(true);
@@ -51,10 +51,16 @@ fn processStream(miracle_output_connection: &mut midir::MidiOutputConnection, st
     }
 }
 
+fn process_input_stream(_timestamp: u64, midi_data: &[u8], stream: &mut std::net::TcpStream) {
+    println!("{:x?}", midi_data);
+    stream.write_all(midi_data);
+    stream.flush();
+}
+
 fn main() -> anyhow::Result<()> {
     let miracle_output = midir::MidiOutput::new("Miracle")?;
     let miracle_output_ports = miracle_output.ports();
-    println!("Output ports: ");
+    println!("Output ports:");
     for (index, port) in miracle_output_ports.iter().enumerate() {
         println!("{}: {}", index, miracle_output.port_name(&port)?);
     }
@@ -74,25 +80,53 @@ fn main() -> anyhow::Result<()> {
 
     let mut miracle_output_connection = miracle_output.connect(&miracle_output_ports[output_index], "Miracle")?;
 
+    let miracle_input = midir::MidiInput::new("Miracle")?;
+    let miracle_input_ports = miracle_input.ports();
+    println!("Input ports:");
+    for (index, port) in miracle_input_ports.iter().enumerate() {
+        println!("{}: {}", index, miracle_input.port_name(&port)?);
+    }
+
+    print!("Choose an input port: ");
+    std::io::stdout().flush()?;
+
+    let mut line = String::new();
+    std::io::stdin().read_line(&mut line)?;
+    let input_index: usize = line.trim().parse()?;
+
 
     let mut stream_result = std::net::TcpStream::connect("127.0.0.1:5858");
+    let _miracle_input_connection; // Keep input connection alive
     match stream_result {
         Ok(mut stream) => {
             println!("Connected as a client on port 5858.");
-            processStream(&mut miracle_output_connection, &mut stream);
+            stream.set_nodelay(true)?;
+            let mut stream_output = stream.try_clone()?;
+            process_output_stream(&mut miracle_output_connection, &mut stream);
+            std::thread::spawn(move || {
+                process_output_stream(&mut miracle_output_connection, &mut stream_output);
+            });
+            _miracle_input_connection = miracle_input.connect(&miracle_input_ports[input_index], "Miracle", process_input_stream, stream)?;
         },
         Err(_) => {
             println!("Unable to connect as client on port 5858. Attempting server mode.");
             let mut listener = std::net::TcpListener::bind("127.0.0.1:5858")?;
-            println!("Listening in server mode on port 5858. Configure DOSBox to point here as a nullmodem.");
+            println!("Listening in one-off server mode on port 5858. Configure DOSBox to point here as a nullmodem.");
             println!("serial 1 nullmodem server:127.0.0.1 port:5858 transparent:1");
 
-            for stream in listener.incoming() {
-                println!("Accepted a connection.");
-                processStream(&mut miracle_output_connection, &mut stream?);
-            }
+            let (stream, _addr) = listener.accept()?;
+            println!("Accepted a connection.");
+            stream.set_nodelay(true)?;
+            let mut stream_output = stream.try_clone()?;
+            std::thread::spawn(move || {
+                process_output_stream(&mut miracle_output_connection, &mut stream_output);
+            });
+            _miracle_input_connection = miracle_input.connect(&miracle_input_ports[input_index], "Miracle", process_input_stream, stream)?;
         }
     }
+
+    println!("Waiting forever...");
+    loop {}
 
     Ok(())
 
