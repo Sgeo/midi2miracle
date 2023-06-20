@@ -65,20 +65,22 @@ fn main() -> anyhow::Result<()> {
     let mut miracle_output_connection = miracle_output.connect(&miracle_output_ports[0], "Miracle")?;
 
 
-    let listener_result = std::net::TcpListener::bind("0.0.0.0:5858");
-    match listener_result {
-        Ok(listener) => {
+    let mut stream_result = std::net::TcpStream::connect("127.0.0.1:5858");
+    match stream_result {
+        Ok(mut stream) => {
+            println!("Connected as a client on port 5858.");
+            processStream(&mut miracle_output_connection, &mut stream);
+        },
+        Err(_) => {
+            println!("Unable to connect as client on port 5858. Attempting server mode.");
+            let mut listener = std::net::TcpListener::bind("127.0.0.1:5858")?;
             println!("Listening in server mode on port 5858. Configure DOSBox to point here as a nullmodem.");
             println!("serial 1 nullmodem server:127.0.0.1 port:5858 transparent:1");
+
             for stream in listener.incoming() {
                 println!("Accepted a connection.");
                 processStream(&mut miracle_output_connection, &mut stream?);
             }
-        },
-        Err(_) => {
-            println!("Unable to run server on port 5858. Attempting client mode.");
-            let mut stream = std::net::TcpStream::connect("127.0.0.1:5858")?;
-            processStream(&mut miracle_output_connection, &mut stream);
         }
     }
 
